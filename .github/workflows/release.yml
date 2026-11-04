@@ -1,0 +1,55 @@
+name: Release
+
+# Every push to main builds a signed APK and publishes it with latest.json,
+# which the app reads to update itself.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ubuntu-latest already ships the Android SDK, and Gradle fetches what it needs.
+
+      - name: Restore keystore
+        run: echo "${{ secrets.MENO_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/meno.jks"
+
+      - name: Build signed APK
+        env:
+          MENO_KEYSTORE_FILE: ${{ runner.temp }}/meno.jks
+          MENO_KEYSTORE_PASSWORD: ${{ secrets.MENO_KEYSTORE_PASSWORD }}
+          MENO_KEY_ALIAS: ${{ secrets.MENO_KEY_ALIAS }}
+          MENO_KEY_PASSWORD: ${{ secrets.MENO_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Publish release and update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.run_number }}
+          NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          NAME="1.0.$RUN"
+          APK="meno-$NAME.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          NOTE=$(printf '%s\n' "$NOTES" | head -1)
+          jq -n \
+            --argjson versionCode "$RUN" \
+            --arg versionName "$NAME" \
+            --arg apkUrl "https://github.com/$GITHUB_REPOSITORY/releases/download/v$RUN/$APK" \
+            --arg notes "$NOTE" \
+            '{versionCode: $versionCode, versionName: $versionName, apkUrl: $apkUrl, notes: $notes}' > latest.json
+          cat latest.json
+          printf '%s\n' "$NOTE" > notes.md
+          gh release create "v$RUN" "$APK" latest.json --title "Meno $NAME" --notes-file notes.md --latest

@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Signing comes from keystore.properties (local, gitignored) or env vars set by CI.
+// Every published APK must use this one key, or the in-app update cannot install.
+def propsFile = rootProject.file("keystore.properties")
+def props = new Properties()
+if (propsFile.exists()) props.load(new FileInputStream(propsFile))
+def ksFile = props['storeFile'] ?: System.getenv("MENO_KEYSTORE_FILE")
+
+def run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+android {
+    namespace 'com.kitticai.meno'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.kitticai.meno"
+        minSdk 26
+        targetSdk 36
+        versionCode run          // The updater compares this, so CI uses the run number.
+        versionName "1.0.$run"
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile != null) {
+                storeFile file(ksFile)
+                storePassword props['storePassword'] ?: System.getenv("MENO_KEYSTORE_PASSWORD")
+                keyAlias props['keyAlias'] ?: System.getenv("MENO_KEY_ALIAS")
+                keyPassword props['keyPassword'] ?: System.getenv("MENO_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile != null) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
